@@ -1,0 +1,98 @@
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Mon, 28 Jul 2025 18:10:02 +0800
+Subject: core/place: Guarantee we never get work area for a NULL logical
+ monitor
+
+Currently `meta_backend_get_current_logical_monitor` can return NULL
+when an external monitor containing the pointer is unplugged while
+windows are being placed or cascaded.
+
+Guarantee we never pass a NULL `MetaLogicalMonitor` into
+`meta_window_get_work_area_for_logical_monitor` or dereference
+`logical_monitor->rect` in `meta_window_place` and `find_next_cascade`
+by falling back to the primary logical monitor (or bailing out cleanly
+if no logical monitor exists).
+
+Related: https://bugs.launchpad.net/bugs/2117277
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/4549>
+
+Origin: backport, https://gitlab.gnome.org/GNOME/mutter/-/commit/785a83ae3c4b39398bf8bf83519468941be44564
+Bug-Ubuntu: https://launchpad.net/bugs/2117277
+---
+ src/core/place.c | 53 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 53 insertions(+)
+
+--- a/src/core/place.c
++++ b/src/core/place.c
+@@ -156,6 +156,23 @@
+    */
+ 
+   current = meta_backend_get_current_logical_monitor (backend);
++  g_warn_if_fail (current);
++
++  if (!current)
++    {
++      MetaMonitorManager *monitor_manager =
++        meta_backend_get_monitor_manager (backend);
++
++      current =
++        meta_monitor_manager_get_primary_logical_monitor (monitor_manager);
++
++      if (!current)
++        {
++          *new_x = x;
++          *new_y = y;
++          return;
++        }
++    }
+   meta_window_get_work_area_for_logical_monitor (window, current, &work_area);
+ 
+   sorted = g_list_copy (windows);
+@@ -895,6 +912,23 @@
+       /* Warning, this function is a round trip! */
+       logical_monitor = meta_backend_get_current_logical_monitor (backend);
+ 
++      g_warn_if_fail (logical_monitor);
++
++      /* Avoid crashing on the above warning, but we would like to fix the root
++       * causes too some day.
++       */
++      if (!logical_monitor)
++        {
++          MetaMonitorManager *monitor_manager =
++            meta_backend_get_monitor_manager (backend);
++
++          logical_monitor =
++            meta_monitor_manager_get_primary_logical_monitor (monitor_manager);
++
++          if (!logical_monitor)
++            goto done;
++        }
++
+       meta_window_get_work_area_for_logical_monitor (window,
+                                                      logical_monitor,
+                                                      &work_area);
+@@ -938,6 +972,23 @@
+   /* Warning, on X11 this might be a round trip! */
+   logical_monitor = meta_backend_get_current_logical_monitor (backend);
+ 
++  g_warn_if_fail (logical_monitor);
++
++  /* Avoid crashing on the above warning, but we would like to fix the root
++   * causes too some day.
++   */
++  if (!logical_monitor)
++    {
++      MetaMonitorManager *monitor_manager =
++        meta_backend_get_monitor_manager (backend);
++
++      logical_monitor =
++        meta_monitor_manager_get_primary_logical_monitor (monitor_manager);
++
++      if (!logical_monitor)
++        goto done;
++    }
++
+   /* Maximize windows if they are too big for their work area (bit of
+    * a hack here). Assume undecorated windows probably don't intend to
+    * be maximized.
